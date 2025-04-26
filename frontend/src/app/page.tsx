@@ -15,6 +15,7 @@ import { Terminal } from "lucide-react"; // Import Icon
 import { FilterControls } from '@/components/trialmatch/filter-controls'; // Import FilterControls
 import { FactsReview } from '@/components/trialmatch/facts-review';
 import { ResultsTable } from '@/components/trialmatch/results-table'; // Import ResultsTable
+import { Progress } from "@/components/ui/progress"; // Added import for Progress
 
 import {
     ExtractedFacts, 
@@ -67,20 +68,31 @@ export default function Home() {
     checkUser();
   }, [supabaseBrowserClient]);
 
-  const handleParseSuccess = async (data: Record<string, unknown>) => {
+  const handleParseSuccess = (data: Record<string, unknown>) => {
     console.log("Parsed data received:", data);
     setInitialParsedData(data);
-    setExtractedFacts(null); // Reset downstream data
+    setExtractedFacts(null); // Reset facts
     setRawTrials([]);
     setRankedTrials([]);
     setErrorMessage(null);
-    setProcessingStep('extracting'); // Move to next step
+    // Change step to indicate data is parsed and ready for extraction
+    setProcessingStep('parsed'); 
+  };
+
+  const handleExtractFacts = async () => {
+    if (!initialParsedData) {
+      setErrorMessage("Cannot extract facts without parsed data.");
+      setProcessingStep('error');
+      return;
+    }
+    setProcessingStep('extracting'); // Indicate extraction is in progress
+    setErrorMessage(null);
 
     try {
       console.log("Invoking extract-facts function...");
       const { data: facts, error: extractError } = await supabaseBrowserClient.functions.invoke(
         'extract-facts', 
-        { body: data } // Send the parsed data to the function
+        { body: initialParsedData } // Send the initially parsed data
       );
 
       if (extractError) {
@@ -89,7 +101,9 @@ export default function Home() {
 
       console.log("Extracted facts received:", facts);
       setExtractedFacts(facts);
-      setProcessingStep('idle'); // Ready for search trigger
+      // Set step back to idle or perhaps a new step like 'reviewing'?
+      // Let's use 'idle' for now, assuming review is passive until search.
+      setProcessingStep('idle'); 
 
     } catch (error: any) {
       console.error("Error invoking extract-facts:", error);
@@ -190,18 +204,20 @@ export default function Home() {
 
   // Render the main page content if user is authenticated
   return (
-    <div className="container mx-auto p-4 md:p-8 space-y-8">
-      <header className="flex justify-between items-center">
-        <div>
-            <h1 className="text-3xl font-bold">TrialMatch</h1>
-            <p className="text-muted-foreground">
-              Find clinical trials based on patient CCD data.
-            </p>
-        </div>
-        <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">{user.email}</span>
-            <LogoutButton />
-        </div>
+    <div className="container mx-auto p-4 md:p-8 space-y-8 relative">
+      
+      {/* User/Logout block positioned absolutely */}
+      <div className="absolute top-4 right-4 md:top-8 md:right-8 flex items-center gap-4 z-10">
+        <span className="text-sm text-muted-foreground hidden sm:inline">{user.email}</span>
+        <LogoutButton />
+      </div>
+
+      {/* Centered Header Content */}
+      <header className="text-center pt-4 pb-4">
+        <h1 className="text-3xl font-bold">TrialMatch</h1>
+        <p className="text-muted-foreground">
+          Find clinical trials based on patient CCD data.
+        </p>
       </header>
 
       {/* Workflow Status/Error Alert */}
@@ -214,9 +230,9 @@ export default function Home() {
       )}
       {/* Could add alerts for other steps too, e.g., extracting, searching... */}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column / Main Area */}
-        <div className="lg:col-span-2 space-y-6">
+      <div className="w-full">
+        <div className="space-y-6">
+          {/* 1. Upload */}
           <Card>
             <CardHeader>
               <CardTitle>1. Upload Patient Data</CardTitle>
@@ -226,65 +242,87 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>2. Review Extracted Facts</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {processingStep === 'extracting' && <p className="text-sm text-muted-foreground">Extracting facts using Gemini...</p>}
-              <FactsReview facts={extractedFacts} />
-            </CardContent>
-          </Card>
-        </div>
+          {/* 2. Review Facts (conditionally shown) */}
+          {(processingStep === 'parsed' || processingStep === 'extracting' || extractedFacts || (processingStep === 'error' && errorMessage)) && (
+            <Card>
+              <CardHeader>
+                <CardTitle>2. Review Extracted Facts</CardTitle>
+              </CardHeader>
+              <CardContent className="min-h-[100px]"> {/* Added min height for consistency */}
+                {/* Content depends on the current step */} 
+                {processingStep === 'parsed' && !errorMessage && (
+                  <div className="flex flex-col items-center space-y-2">
+                    <Button onClick={handleExtractFacts}>
+                      Extract Facts using AI
+                    </Button>
+                  </div>
+                )}
+                {processingStep === 'extracting' && (
+                  <p className="text-sm text-muted-foreground flex items-center">
+                    {/* Add a spinner icon here later */}
+                    Extracting facts using Gemini...
+                  </p>
+                )}
+                {/* Show facts review whenever facts exist (modified condition) */}
+                {extractedFacts && (
+                   <FactsReview facts={extractedFacts} />
+                )}
+                {/* Placeholder only shown initially or if extraction fails immediately */}
+                {!extractedFacts && (processingStep === 'idle' || processingStep === 'parsed') && (
+                   <p className="text-sm text-muted-foreground">Facts extracted by Gemini will appear here after successful upload and parse.</p>
+                )}
+                {/* Error message specific to extraction */}
+                {processingStep === 'error' && errorMessage && !extractedFacts && (
+                  <p className="text-sm text-destructive">Error during fact extraction: {errorMessage}</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-        {/* Right Column / Sidebar */}
-        <div className="lg:col-span-1 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>3. Filters</CardTitle>
-            </CardHeader>
-            <CardContent>
-               <FilterControls filters={filters} onFiltersChange={handleFiltersChange} />
-            </CardContent>
-          </Card>
+          {/* 3. Filters (conditionally shown) */}
+          {extractedFacts && (
+            <Card>
+              <CardHeader>
+                 <CardTitle>3. Filters</CardTitle>
+              </CardHeader>
+              <CardContent>
+                 <FilterControls filters={filters} onFiltersChange={handleFiltersChange} />
+              </CardContent>
+            </Card>
+          )}
 
-          {/* 4. Trigger Search */}
-           <Button 
-             onClick={handleSearchAndRank}
-             disabled={!extractedFacts || processingStep === 'searching' || processingStep === 'ranking' || processingStep === 'extracting'}
-             className="w-full"
-           >
-             {processingStep === 'searching' ? 'Searching...' : 
-              processingStep === 'ranking' ? 'Ranking...' : 'Find Matching Trials'}
-           </Button>
+          {/* Find Trials Button (conditionally shown) */}
+          {extractedFacts && (
+            <Button 
+              onClick={handleSearchAndRank} 
+              disabled={processingStep === 'searching' || processingStep === 'ranking'} 
+              className="w-full"
+            >
+              {processingStep === 'searching' ? 'Searching...' : processingStep === 'ranking' ? 'Ranking...' : 'Find Matching Trials'}
+            </Button>
+          )}
+
+          {/* Progress Bar (conditionally shown during search/rank) */}
+          {(processingStep === 'searching' || processingStep === 'ranking') && (
+            <Progress value={50} className="w-full h-2 animate-pulse" /> // Use value/pulse for indeterminate feel
+          )}
+
+          {/* 4. Matching Trials (conditionally shown after completion) */}
+          {processingStep === 'complete' && (
+            <Card>
+              <CardHeader>
+                <CardTitle>4. Matching Trials</CardTitle>
+              </CardHeader>
+              <CardContent>
+                 <ResultsTable data={rankedTrials} /> 
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
 
-      {/* Results Area (Below Grid) */}
-      <div className="mt-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>5. Matching Trials</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {processingStep === 'searching' && <p className="text-sm text-muted-foreground">Searching ClinicalTrials.gov...</p>}
-            {processingStep === 'ranking' && <p className="text-sm text-muted-foreground">Ranking results with Gemini...</p>}
-            {processingStep === 'complete' && rankedTrials.length === 0 && <p className="text-sm text-center text-muted-foreground py-4">No trials found matching the criteria.</p>} 
-            {(processingStep === 'complete' || rankedTrials.length > 0) && rankedTrials.length > 0 ? (
-                <ResultsTable data={rankedTrials} />
-            ) : (
-                <p className="text-sm text-center text-muted-foreground py-4">
-                    {processingStep !== 'searching' && processingStep !== 'ranking' && processingStep !== 'complete' && "Ranked clinical trial results will appear here after searching."}
-                </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      {/* Footer removed */}
 
-      {/* HIPAA Banner */}
-      <footer className="mt-12 text-center text-sm text-destructive font-semibold">
-        <p>DEMO ONLY - NOT HIPAA COMPLIANT FOR PRODUCTION USE</p>
-      </footer>
-    </div>
+    </div> /* Closes the main container div */
   );
 }

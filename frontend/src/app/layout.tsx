@@ -25,9 +25,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen`}
       >
-        {children}
+        <main className="flex-grow flex flex-col items-center w-full">
+          {children}
+        </main>
+        <footer className="w-full mt-auto p-4 text-center text-base text-destructive font-semibold bg-background">
+          <p>DEMO ONLY - NOT HIPAA COMPLIANT FOR PRODUCTION USE</p>
+        </footer>
       </body>
     </html>
   );

@@ -60,4 +60,4 @@ export interface RankedTrialData {
 
 // --- Component/Workflow State ---
 
-export type ProcessingStep = 'idle' | 'parsing' | 'extracting' | 'searching' | 'ranking' | 'complete' | 'error'; 
+export type ProcessingStep = 'idle' | 'parsing' | 'parsed' | 'extracting' | 'searching' | 'ranking' | 'complete' | 'error'; 
