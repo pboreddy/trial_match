@@ -76,8 +76,8 @@ serve(async (req: Request) => {
     if (extractedFacts.age !== undefined) {
        // Search trials where the patient's age falls within the trial's eligibility range
        // Using AREA specifier for age range seems more consistent with other filters
-      filterQueryParts.push(`AREA[MinimumAge] RANGE[, ${extractedFacts.age} years]`);
-      filterQueryParts.push(`AREA[MaximumAge] RANGE[${extractedFacts.age} years, ]`);
+      // filterQueryParts.push(`AREA[MinimumAge] RANGE[, ${extractedFacts.age} years]`); // Temporarily commented out
+      // filterQueryParts.push(`AREA[MaximumAge] RANGE[${extractedFacts.age} years, ]`); // Temporarily commented out
     }
 
     // Gender

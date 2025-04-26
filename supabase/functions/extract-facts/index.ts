@@ -24,22 +24,25 @@ const desiredJsonSchema = {
   properties: {
     age: { type: "NUMBER", description: "Patient's age in years" },
     gender: { type: "STRING", description: "Patient's gender (e.g., Male, Female, Other)" },
-    conditions: { 
-      type: "ARRAY", 
-      description: "List of major medical conditions or diagnoses, preferably with ICD-10 codes if available.",
-      items: { 
+    conditions: {
+      type: "ARRAY",
+      description: "List of major medical conditions or diagnoses.",
+      items: {
         type: "OBJECT",
         properties: {
           term: { type: "STRING", description: "Condition name/term" },
-          icd10Code: { type: "STRING", description: "ICD-10 code, if found" }
+          icd10Code: {
+            type: "STRING",
+            description: "ICD-10 code, if found. Use JSON null if not found."
+          }
         },
         required: ["term"]
-      } 
+      }
     },
-    medications: { 
-      type: "ARRAY", 
+    medications: {
+      type: "ARRAY",
       description: "List of relevant medications the patient is taking.",
-      items: { type: "STRING" } 
+      items: { type: "STRING" }
     },
     immunizations: {
       type: "ARRAY",
@@ -48,8 +51,8 @@ const desiredJsonSchema = {
         type: "OBJECT",
         properties: {
           name: { type: "STRING", description: "Name of the vaccine/immunization" },
-          date: { type: "STRING", description: "Date of immunization if available" },
-          status: { type: "STRING", description: "Status of the immunization (completed, in progress, etc.)" }
+          date: { type: "STRING", description: "Date of immunization (YYYY-MM-DD or similar) if available. Use JSON null if not found." },
+          status: { type: "STRING", description: "Status of the immunization (e.g., completed). Use JSON null if not found." }
         },
         required: ["name"]
       }
@@ -57,7 +60,7 @@ const desiredJsonSchema = {
     zipCode: { type: "STRING", description: "Patient's 5-digit ZIP code for location/distance calculation." },
     // Add other fields as needed based on CCD/FHIR structure and trial criteria
   },
-  required: ["age", "gender", "conditions", "zipCode"] // Example required fields
+  required: ["age", "gender", "conditions", "zipCode"]
 };
 
 // --- Helper: Basic De-identification (Placeholder - Requires Adaptation!) ---
@@ -135,7 +138,7 @@ serve(async (req: Request) => {
 
     // 3. Prepare Prompt for Gemini
     const prompt = `Analyze the following de-identified patient data, which originated from a CCD or FHIR document. Extract the specified information and return it ONLY as a valid JSON object matching the provided schema. 
-    
+
     Patient Data:
     \`\`\`json
     ${JSON.stringify(deIdentifiedData, null, 2)}
@@ -144,9 +147,9 @@ serve(async (req: Request) => {
     Focus on extracting:
     - Age (years)
     - Gender
-    - Conditions (list with terms and ICD-10 if available)
+    - Conditions (list with terms and ICD-10 if available). IMPORTANT: For conditions, if an ICD-10 code is NOT found for a term, use the JSON value null for the 'icd10Code' field, do NOT use the string \"null\".
     - Medications (list)
-    - Immunizations (with name, date if available, and status) - Look for fields like "immunization", "vaccine", "vaccination", "immunizationHistory", etc. These might be in sections called "immunizations", "vaccinations", or within a clinical data section.
+    - Immunizations (with name, date, and status). IMPORTANT: For immunizations, if date or status are NOT found, use the JSON value null for those fields, do NOT use the string \"null\". Look for fields like "immunization", "vaccine", "vaccination", "immunizationHistory", etc. These might be in sections called "immunizations", "vaccinations", or within a clinical data section.
     - 5-digit ZIP Code
     
     For immunizations, look for patterns like this sample from a CCD document:
@@ -174,7 +177,7 @@ serve(async (req: Request) => {
 
     Extract the name of the vaccine, the date if available, and status if available.
     
-    If a required field isn't clearly present, use null or an empty list as appropriate for the type. Ensure the output strictly adheres to the JSON schema.`;
+    If a required field (like age, gender, conditions list, zipCode) isn't clearly present, use null or an empty list as appropriate for the type. Ensure the output strictly adheres to the JSON schema.`;
 
     // 4. Call Gemini API
     if (!API_KEY) {
@@ -199,11 +202,40 @@ serve(async (req: Request) => {
     
     // Extract the JSON text, assuming it's valid because we requested JSON output + schema
     const extractedJsonText = response.candidates[0].content.parts[0].text;
-    const extractedFacts = JSON.parse(extractedJsonText); // Parse the JSON string from Gemini
+    let extractedFacts = JSON.parse(extractedJsonText); // Parse the JSON string from Gemini
 
-    console.log("Successfully extracted facts:", extractedFacts);
+    // --- Data Cleaning Step --- 
+    // Ensure conditions is an array
+    if (extractedFacts.conditions && Array.isArray(extractedFacts.conditions)) {
+      // Clean up icd10Code: replace string "null" with actual null
+      extractedFacts.conditions = extractedFacts.conditions.map(cond => {
+        if (cond.icd10Code === "null") {
+          // Return a new object without the icd10Code property if it was the string "null"
+          const { icd10Code, ...rest } = cond;
+          return rest;
+          // Alternatively, explicitly set to null: return { ...cond, icd10Code: null }; 
+          // Setting to undefined (by omitting) is cleaner for the frontend logic which checks truthiness.
+        }
+        return cond;
+      });
+    }
+    // Add similar cleaning for immunizations if needed (checking date/status for "null" string)
+    if (extractedFacts.immunizations && Array.isArray(extractedFacts.immunizations)) {
+        extractedFacts.immunizations = extractedFacts.immunizations.map(imm => {
+            let cleanedImm = { ...imm };
+            if (cleanedImm.date === "null") {
+                delete cleanedImm.date; // Remove if string "null"
+            }
+            if (cleanedImm.status === "null") {
+                delete cleanedImm.status; // Remove if string "null"
+            }
+            return cleanedImm;
+        });
+    }
 
-    // 5. Return Extracted Facts
+    console.log("Cleaned extracted facts:", extractedFacts);
+
+    // 5. Return Cleaned Extracted Facts
     return new Response(JSON.stringify(extractedFacts), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
