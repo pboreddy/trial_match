@@ -6,7 +6,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
 import { serve } from 'https://deno.land/std@0.170.0/http/server.ts';
-import { GoogleGenerativeAI } from 'npm:@google/generative-ai@0.11.3';
 import { corsHeaders } from '../_shared/cors.ts';
 
 console.log("Hello from Functions!")
@@ -15,9 +14,12 @@ console.log("Hello from Functions!")
 const API_KEY = Deno.env.get('GOOGLE_API_KEY');
 if (!API_KEY) {
   console.error('Missing GOOGLE_API_KEY environment variable.');
+  // Throw error immediately if key is missing, as function cannot proceed
+  throw new Error("GOOGLE_API_KEY environment variable is not set.");
 }
-const genAI = new GoogleGenerativeAI(API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-latest" }); // Or pro
+// Define the REST API endpoint using the specific model
+const GEMINI_MODEL = "gemini-1.5-flash-latest"; // Keep using flash for consistency
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${API_KEY}`;
 
 // --- Interfaces ---
 // Simplified Trial structure (based on fields requested in search-trials)
@@ -58,12 +60,12 @@ const rankedTrialSchema = {
   type: "OBJECT",
   properties: {
     nctId: { type: "STRING" },
-    matchPercentage: { 
-      type: "NUMBER", 
+    matchPercentage: {
+      type: "NUMBER",
       description: "Estimated match likelihood (0-100) based on condition, age, gender, and proximity."
     },
-    summaryNote: { 
-      type: "STRING", 
+    summaryNote: {
+      type: "STRING",
       description: "Brief summary (1-2 sentences) explaining the match score, highlighting key eligibility factors (condition, age, gender) and potential issues or proximity."
     },
     // You could add distance here if calculated separately
@@ -140,34 +142,49 @@ serve(async (req: Request) => {
     Ensure the output array has the same number of elements as the input trials list. Use the correct nctId for each trial.
     `;
 
-    // 3. Call Gemini API
-    if (!API_KEY) {
-      throw new Error("GOOGLE_API_KEY is not configured in Supabase secrets.");
-    }
+    // 3. Call Gemini REST API using fetch
+    console.log("Sending request to Gemini REST API for ranking/summarization...");
 
-    console.log("Sending request to Gemini for ranking/summarization...");
-    const result = await model.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: responseSchema, // Provide the schema for the array response
-        },
+    const requestBody = {
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: responseSchema, // Provide the schema for the array response
+      },
+    };
+
+    const geminiResponse = await fetch(GEMINI_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
     });
-    
-    const response = result.response;
-    console.log("Raw Gemini ranking response:", JSON.stringify(response, null, 2));
 
-    if (!response || !response.candidates || response.candidates.length === 0 || !response.candidates[0].content || !response.candidates[0].content.parts || response.candidates[0].content.parts.length === 0) {
-       throw new Error("Gemini returned an empty or invalid response for ranking.");
+    console.log(`Gemini API response status: ${geminiResponse.status}`);
+
+    if (!geminiResponse.ok) {
+      const errorBody = await geminiResponse.text();
+      console.error("Gemini API Error:", errorBody);
+      throw new Error(`Gemini API request failed with status ${geminiResponse.status}: ${errorBody}`);
     }
-    
-    const rankedJsonText = response.candidates[0].content.parts[0].text;
+
+    const responseData = await geminiResponse.json();
+    console.log("Raw Gemini ranking response:", JSON.stringify(responseData, null, 2));
+
+    // Validate the structure received from the REST API
+    if (!responseData || !responseData.candidates || responseData.candidates.length === 0 || !responseData.candidates[0].content || !responseData.candidates[0].content.parts || responseData.candidates[0].content.parts.length === 0) {
+       throw new Error("Gemini returned an empty or invalid response structure for ranking.");
+    }
+
+    // Extract the JSON text payload
+    const rankedJsonText = responseData.candidates[0].content.parts[0].text;
     const rankedTrialsData = JSON.parse(rankedJsonText); // Parse the JSON array string
 
     // Optional: Combine ranked data with original trial data if needed by frontend
     // For now, just return the ranked data (NCTId, score, note)
 
-    console.log("Successfully ranked/summarized trials:", rankedTrialsData);
+    console.log("Successfully ranked/summarized trials via REST API:", rankedTrialsData);
 
     // 4. Return Ranked & Summarized Trials
     return new Response(JSON.stringify(rankedTrialsData), {
@@ -187,12 +204,12 @@ serve(async (req: Request) => {
 
 /* To invoke locally:
 
-  1. Run `supabase start` (see: https://supabase.com/docs/reference/cli/supabase-start)
+  1. Run \`supabase start\` (see: https://supabase.com/docs/reference/cli/supabase-start)
   2. Make an HTTP request:
 
-  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/rank-summarize-trials' \
-    --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0' \
-    --header 'Content-Type: application/json' \
-    --data '{"name":"Functions"}'
+  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/rank-summarize-trials' \\
+    --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0' \\
+    --header 'Content-Type: application/json' \\
+    --data '{"extractedFacts": {...}, "trials": [...] }' // Provide sample data
 
 */
