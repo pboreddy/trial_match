@@ -1,6 +1,6 @@
 # TrialMatch Web
 
-A HIPAA-ready web app that ingests a patient's Continuity of Care Document (CCD XML), mines key eligibility facts, queries ClinicalTrials.gov v2, and uses GPT-4o to rank & summarize the best recruiting trials within X miles.
+TrialMatch is a web app that ingests a patient's Continuity of Care Document (CCD XML), mines key eligibility facts, queries ClinicalTrials.gov v2, and uses GPT-4o to rank & summarize the best recruiting trials within X miles.
 
 ## Project Structure
 

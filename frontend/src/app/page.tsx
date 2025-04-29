@@ -228,7 +228,6 @@ export default function Home() {
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       )}
-      {/* Could add alerts for other steps too, e.g., extracting, searching... */}
 
       <div className="w-full">
         <div className="space-y-6">
@@ -259,7 +258,6 @@ export default function Home() {
                 )}
                 {processingStep === 'extracting' && (
                   <p className="text-sm text-muted-foreground flex items-center">
-                    {/* Add a spinner icon here later */}
                     Extracting facts using Gemini...
                   </p>
                 )}
